@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sile's Deckbuilder</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0.75em;
+      font-family: Arial, sans-serif;
+    }
+
+    h3 {
+      margin: 0 0 0.75em;
+    }
+
+    table {
+      width: 32em;
+      table-layout: fixed;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      box-sizing: border-box;
+      padding: 0.25em;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    #rows tr:nth-child(odd) {
+      background-color: #f2f2f2;
+    }
+
+    #rows tr:nth-child(even) {
+      background-color: #fff;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input[type="number"] {
+      box-sizing: border-box;
+      width: 2em;
+      appearance: textfield;
+      -moz-appearance: textfield;
+    }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      margin: 0;
+      -webkit-appearance: none;
+    }
+
+    .persona-inputs {
+      display: flex;
+      justify-content: space-between;
+      width: 24em;
+    }
+
+    .persona-inputs label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25em;
+      white-space: nowrap;
+    }
+
+    .attack-label {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 0.25em;
+    }
+
+    .attack-label select {
+      box-sizing: border-box;
+      width: 2.25em;
+    }
+
+    output {
+      min-width: 2.5em;
+    }
+
+    output.not-defaulted {
+      color: #999;
+      font-style: italic;
+    }
+
+    .total-row td {
+      padding-top: 0.5em;
+    }
+
+    #mpcp.over-limit,
+    #totalOutput.over-limit {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <h3>Sile's Deckbuilder</h3>
+
+  <div class="persona-inputs">
+    <label for="inputBod">Bod
+      <input id="inputBod" type="number" min="1" max="12" step="1">
+    </label>
+    <label for="inputMasking">Masking
+      <input id="inputMasking" type="number" min="1" max="12" step="1">
+    </label>
+    <label for="inputSensor">Sensor
+      <input id="inputSensor" type="number" min="1" max="12" step="1">
+    </label>
+    <label for="inputEvasion">Evasion
+      <input id="inputEvasion" type="number" min="1" max="12" step="1">
+    </label>
+  </div>
+
+  <p id="mpcp">Minimum MPCP: <output id="mpcpOutput">0</output></p>
+
+  <table>
+    <colgroup>
+      <col style="width: 8em">
+      <col style="width: 6em">
+      <col style="width: 8em">
+      <col style="width: 10em">
+    </colgroup>
+    <thead>
+      <tr>
+        <th scope="col"></th>
+        <th scope="col">Input</th>
+        <th scope="col">Defaulted?</th>
+        <th scope="col">Size</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td></td>
+        <td><button id="clearButton" type="button">Clear</button></td>
+        <td></td>
+        <td><output id="totalOutput">0 MP required</output></td>
+      </tr>
+    </tfoot>
+  </table>
+
+<script>
+  const multipliers = {
+    Analyze: 3,
+    Armor: 3,
+    Browse: 1,
+    Camo: 3,
+    Cloak: 3,
+    Commlink: 1,
+    Crash: 3,
+    Deception: 2,
+    Defuse: 2,
+    Decrypt: 1,
+    Evaluate: 2,
+    LockOn: 3,
+    Medic: 4,
+    RadioLink: 1,
+    ReadWrite: 2,
+    Shield: 4,
+    Sleaze: 3,
+    Swerve: 3
+  };
+
+  const labels = {
+    Analyze: "Analyze",
+    Armor: "Armor",
+    Browse: "Browse",
+    Camo: "Camo",
+    Cloak: "Cloak",
+    Commlink: "Commlink",
+    Crash: "Crash",
+    Deception: "Deception",
+    Defuse: "Defuse",
+    Decrypt: "Decrypt",
+    Evaluate: "Evaluate",
+    LockOn: "Lock-On",
+    Medic: "Medic",
+    RadioLink: "Radio Link",
+    ReadWrite: "Read/Write",
+    Shield: "Shield",
+    Sleaze: "Sleaze",
+    Swerve: "Swerve"
+  };
+
+  const rows = document.getElementById("rows");
+  const totalOutput = document.getElementById("totalOutput");
+  const mpcpOutput = document.getElementById("mpcpOutput");
+  const mpcpLine = document.getElementById("mpcp");
+
+  const personaInputs = [
+    "inputBod",
+    "inputMasking",
+    "inputSensor",
+    "inputEvasion"
+  ].map(id => document.getElementById(id));
+
+  function getRatingBasedMPCP() {
+    const personaSum = personaInputs.reduce((sum, input) => {
+      const value =
+        input.value !== "" && input.validity.valid
+          ? Number(input.value)
+          : 0;
+
+      return sum + value;
+    }, 0);
+
+    const highestRating = Math.max(
+      0,
+      ...[...document.querySelectorAll('input[type="number"]')]
+        .map(input =>
+          input.value !== "" && input.validity.valid
+            ? Number(input.value)
+            : 0
+        )
+    );
+
+    return Math.max(Math.ceil(personaSum / 3), highestRating);
+  }
+
+  function updateMPCP(totalMP) {
+    const ratingBasedMPCP = getRatingBasedMPCP();
+    const mpBasedMPCP = Math.ceil(totalMP / 250);
+    const mpcp = Math.max(ratingBasedMPCP, mpBasedMPCP);
+
+    mpcpOutput.textContent = String(mpcp);
+    mpcpLine.classList.toggle("over-limit", mpcp > 12);
+
+    return ratingBasedMPCP;
+  }
+
+  function updateTotal() {
+    const totalMP = [...rows.querySelectorAll("tr")].reduce(
+      (sum, row) => {
+        const output = row.querySelector("output");
+        const checkbox = row.querySelector('input[type="checkbox"]');
+
+        if (!output || !checkbox) return sum;
+
+        const value = Number(output.textContent);
+
+        return checkbox.checked && Number.isFinite(value)
+          ? sum + value
+          : sum;
+      },
+      0
+    );
+
+    totalOutput.textContent = `${totalMP} MP required`;
+
+    const ratingBasedMPCP = updateMPCP(totalMP);
+    const redLimit = Math.min(ratingBasedMPCP, 12) * 250;
+
+    totalOutput.classList.toggle("over-limit", totalMP > redLimit);
+  }
+
+  function makeAttackRow() {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td>
+        <span class="attack-label">
+          <label for="inputAttack">Attack</label>
+          <select id="attackSize">
+            <option value="" selected></option>
+            <option value="2">L</option>
+            <option value="3">M</option>
+            <option value="4">S</option>
+            <option value="5">D</option>
+          </select>
+        </span>
+      </td>
+      <td><input id="inputAttack" type="number" min="1" max="12" step="1"></td>
+      <td><input id="defaultAttack" type="checkbox"></td>
+      <td><output id="outputAttack"></output></td>
+    `;
+
+    return row;
+  }
+
+  document.addEventListener("input", event => {
+    const input = event.target;
+
+    if (
+      input instanceof HTMLInputElement &&
+      input.type === "number" &&
+      input.valueAsNumber > 12
+    ) {
+      input.value = "12";
+    }
+  }, true);
+
+  for (const [name, multiplier] of Object.entries(multipliers)) {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td><label for="input${name}">${labels[name]}</label></td>
+      <td><input id="input${name}" type="number" min="1" max="12" step="1"></td>
+      <td><input id="default${name}" type="checkbox"></td>
+      <td><output id="output${name}"></output></td>
+    `;
+
+    rows.appendChild(row);
+
+    const input = row.querySelector(`#input${name}`);
+    const output = row.querySelector(`#output${name}`);
+    const checkbox = row.querySelector(`#default${name}`);
+
+    function update() {
+      const wasInvalid = output.textContent === "";
+      const valid = input.value !== "" && input.validity.valid;
+      const value = valid
+        ? Number(input.value) ** 2 * multiplier
+        : null;
+
+      output.textContent = value === null ? "" : String(value);
+
+      if (value === null) {
+        checkbox.checked = false;
+      } else if (wasInvalid) {
+        checkbox.checked = true;
+      }
+
+      output.classList.toggle("not-defaulted", !checkbox.checked);
+      updateTotal();
+    }
+
+    input.addEventListener("input", update);
+
+    checkbox.addEventListener("change", () => {
+      output.classList.toggle("not-defaulted", !checkbox.checked);
+      updateTotal();
+    });
+  }
+
+  const attackRow = makeAttackRow();
+  rows.insertBefore(attackRow, rows.children[2] ?? null);
+
+  const attackInput = document.getElementById("inputAttack");
+  const attackSize = document.getElementById("attackSize");
+  const attackOutput = document.getElementById("outputAttack");
+  const attackCheckbox = document.getElementById("defaultAttack");
+
+  function updateAttack() {
+    const wasInvalid = attackOutput.textContent === "";
+    const valid =
+      attackInput.value !== "" &&
+      attackInput.validity.valid &&
+      attackSize.value !== "";
+
+    const value = valid
+      ? Number(attackInput.value) ** 2 * Number(attackSize.value)
+      : null;
+
+    attackOutput.textContent = value === null ? "" : String(value);
+
+    if (value === null) {
+      attackCheckbox.checked = false;
+    } else if (wasInvalid) {
+      attackCheckbox.checked = true;
+    }
+
+    attackOutput.classList.toggle("not-defaulted", !attackCheckbox.checked);
+    updateTotal();
+  }
+
+  attackInput.addEventListener("input", updateAttack);
+  attackSize.addEventListener("change", updateAttack);
+
+  attackCheckbox.addEventListener("change", () => {
+    attackOutput.classList.toggle("not-defaulted", !attackCheckbox.checked);
+    updateTotal();
+  });
+
+  personaInputs.forEach(input =>
+    input.addEventListener("input", updateTotal)
+  );
+
+  const STORAGE_KEY = "silesDeckbuilder";
+  let restoringInputs = false;
+
+  function saveInputs() {
+    if (restoringInputs) return;
+
+    const values = {};
+
+    document.querySelectorAll("input, select").forEach(element => {
+      if (!element.id) return;
+
+      values[element.id] =
+        element instanceof HTMLInputElement && element.type === "checkbox"
+          ? element.checked
+          : element.value;
+    });
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+    } catch (error) {
+      console.error("Could not save deckbuilder inputs:", error);
+    }
+  }
+
+  function restoreInputs() {
+    let values = {};
+
+    try {
+      values = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    } catch (error) {
+      console.error("Could not load saved deckbuilder inputs:", error);
+    }
+
+    restoringInputs = true;
+
+    for (const [id, value] of Object.entries(values)) {
+      const element = document.getElementById(id);
+      if (!element) continue;
+
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        element.checked = Boolean(value);
+      } else {
+        element.value = value;
+      }
+    }
+
+    document.querySelectorAll('input[type="number"]').forEach(input => {
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    attackSize.dispatchEvent(new Event("change", { bubbles: true }));
+
+    for (const [id, value] of Object.entries(values)) {
+      const element = document.getElementById(id);
+
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        element.checked = Boolean(value);
+      }
+    }
+
+    document.querySelectorAll("#rows tr").forEach(row => {
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      const output = row.querySelector("output");
+
+      if (checkbox && output) {
+        output.classList.toggle("not-defaulted", !checkbox.checked);
+      }
+    });
+
+    updateTotal();
+    restoringInputs = false;
+  }
+
+  document.getElementById("clearButton").addEventListener("click", () => {
+    document.querySelectorAll("input, select").forEach(element => {
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        element.checked = false;
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        element.value = "";
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+
+    updateTotal();
+    saveInputs();
+  });
+
+  document.addEventListener("input", saveInputs);
+  document.addEventListener("change", saveInputs);
+
+  restoreInputs();
+</script>
+</body>
+</html>
